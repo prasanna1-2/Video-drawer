@@ -19,7 +19,7 @@ body{margin:0;color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",R
 h1{font-size:1.4rem;margin:0 0 6px;letter-spacing:-.01em}
 p{color:var(--muted);margin:0 0 22px;font-size:.95rem;line-height:1.45}
 .pins{display:flex;gap:12px;justify-content:center;margin-bottom:12px}
-.pins input{width:56px;height:68px;text-align:center;font-size:1.8rem;font-weight:600;border-radius:16px;border:1.5px solid var(--border);background:var(--card);color:var(--text);outline:none;transition:border-color .15s,transform .15s,box-shadow .15s;-webkit-text-security:disc}
+.pins input{width:56px;height:68px;text-align:center;font-size:1.8rem;font-weight:600;border-radius:16px;border:1.5px solid var(--border);background:var(--card);color:var(--text);outline:none;transition:border-color .15s,transform .15s,box-shadow .15s}
 .pins input:focus{border-color:var(--accent);box-shadow:0 0 0 4px rgba(124,140,255,.22);transform:translateY(-2px)}
 .pins.shake{animation:shake .4s}
 .pins.shake input{border-color:var(--err)}
@@ -32,3 +32,115 @@ video{width:100%;max-height:72vh;display:block;background:#000}
 .dot{width:10px;height:10px;border-radius:50%;background:#3ddc84;box-shadow:0 0 10px #3ddc84}
 .head h1{margin:0;font-size:1.15rem}
 input.txt{width:100%;padding:12px;border-radius:12px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:1rem;margin-bottom:12px}
+button{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:0;border-radius:12px;padding:12px 18px;font-size:1rem;cursor:pointer;width:100%}
+</style>
+</head>
+<body>
+<div class="card" id="app"></div>
+<script>
+/* ===== CONFIG ===== */
+var VIDEO_FILE = "video.mp4";   // your video's file name in the repo
+var TITLE = "Private Screening";
+var PASSWORD_HASH = "1c6d4fb8be742a4163c83bfd0256287207b4fc6e04233cea16793937c354c0c9"; // password: 9856
+var PIN_LENGTH = 4;
+/* ================== */
+
+var app = document.getElementById('app');
+var card = app;
+function sha256js(ascii){
+  function rr(v,n){return (v>>>n)|(v<<(32-n));}
+  var mp=Math.pow,mw=mp(2,32),i,j,result='',words=[],bl=ascii.length*8,hash=[],k=[],pc=0,comp={};
+  for(var c=2;pc<64;c++){
+    if(!comp[c]){
+      for(i=0;i<313;i+=c)comp[i]=c;
+      hash[pc]=(mp(c,.5)*mw)|0;
+      k[pc++]=(mp(c,1/3)*mw)|0;
+    }
+  }
+  ascii+='\x80';
+  while(ascii.length%64-56)ascii+='\x00';
+  for(i=0;i<ascii.length;i++){j=ascii.charCodeAt(i);words[i>>2]|=j<<((3-i)%4)*8;}
+  words[words.length]=((bl/mw)|0);
+  words[words.length]=bl;
+  for(j=0;j<words.length;){
+    var w=words.slice(j,j+=16),old=hash;
+    hash=hash.slice(0,8);
+    for(i=0;i<64;i++){
+      var w15=w[i-15],w2=w[i-2],a=hash[0],e=hash[4];
+      var t1=hash[7]+(rr(e,6)^rr(e,11)^rr(e,25))+((e&hash[5])^((~e)&hash[6]))+k[i]+(w[i]=(i<16)?w[i]:(w[i-16]+(rr(w15,7)^rr(w15,18)^(w15>>>3))+w[i-7]+(rr(w2,17)^rr(w2,19)^(w2>>>10)))|0);
+      var t2=(rr(a,2)^rr(a,13)^rr(a,22))+((a&hash[1])^(a&hash[2])^(hash[1]&hash[2]));
+      hash=[(t1+t2)|0].concat(hash);
+      hash[4]=(hash[4]+t1)|0;
+    }
+    for(i=0;i<8;i++)hash[i]=(hash[i]+old[i])|0;
+  }
+  for(i=0;i<8;i++)for(j=3;j+1;j--){var b=(hash[i]>>(j*8))&255;result+=((b<16)?'0':'')+b.toString(16);}
+  return result;
+}
+async function sha(s){
+  var text='pv-salt:'+s;
+  try{
+    if(window.crypto&&crypto.subtle){
+      var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));
+      return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('');
+    }
+  }catch(e){}
+  return sha256js(unescape(encodeURIComponent(text)));
+}
+function el(t,p,k){var e=document.createElement(t);for(var a in (p||{}))e[a]=p[a];(k||[]).forEach(function(c){e.appendChild(c)});return e;}
+
+function player(){
+  app.className='card'; app.innerHTML='';
+  var v = el('video',{controls:true,playsInline:true,preload:'metadata',src:VIDEO_FILE});
+  var note = el('div',{className:'msg'});
+  v.addEventListener('error',function(){note.className='msg err';note.textContent='Video not found. Check that VIDEO_FILE ("'+VIDEO_FILE+'") matches the file name in your repo exactly, including capitals.';});
+  app.append(el('div',{className:'head'},[el('span',{className:'dot'}),el('h1',{textContent:TITLE})]), el('div',{className:'player'},[v]), note);
+}
+
+function gate(){
+  app.className='card narrow'; app.innerHTML='';
+  var pins = el('div',{className:'pins'}), boxes=[];
+  var msg = el('div',{className:'msg'});
+  for(var i=0;i<PIN_LENGTH;i++){
+    (function(i){
+      var b = el('input',{type:'password',inputMode:'numeric',pattern:'[0-9]*',maxLength:1,autocomplete:'off',ariaLabel:'Digit '+(i+1)});
+      b.addEventListener('input',function(){
+        b.value = b.value.replace(/\D/g,'').slice(-1);
+        if(b.value && i<PIN_LENGTH-1) boxes[i+1].focus();
+        if(boxes.every(function(x){return x.value})) check();
+      });
+      b.addEventListener('keydown',function(e){
+        if(e.key==='Backspace' && !b.value && i>0){ boxes[i-1].value=''; boxes[i-1].focus(); }
+      });
+      b.addEventListener('paste',function(e){
+        var t=(e.clipboardData.getData('text')||'').replace(/\D/g,'').slice(0,PIN_LENGTH);
+        if(!t) return; e.preventDefault();
+        t.split('').forEach(function(c,j){boxes[j].value=c});
+        if(t.length===PIN_LENGTH) check(); else boxes[t.length].focus();
+      });
+      boxes.push(b); pins.appendChild(b);
+    })(i);
+  }
+  async function check(){
+    var pin = boxes.map(function(x){return x.value}).join('');
+    if(await sha(pin)===PASSWORD_HASH){ player(); return; }
+    msg.className='msg err'; msg.textContent='Incorrect code. Try again.';
+    pins.classList.remove('shake'); void pins.offsetWidth; pins.classList.add('shake');
+    boxes.forEach(function(x){x.value=''}); boxes[0].focus();
+  }
+  app.append(el('div',{className:'lock',textContent:'🔒'}), el('h1',{textContent:TITLE}), el('p',{textContent:'Enter the '+PIN_LENGTH+'-digit code to watch.'}), pins, msg);
+  boxes[0].focus();
+}
+
+function setup(){
+  app.className='card narrow'; app.innerHTML='';
+  var pw = el('input',{className:'txt',type:'text',placeholder:'Type a password'});
+  var out = el('div',{className:'msg'});
+  app.append(el('h1',{textContent:'Password setup'}), el('p',{textContent:'Generate a hash and paste it into PASSWORD_HASH.'}), pw,
+    el('button',{textContent:'Generate hash',onclick:async function(){out.className='msg';out.textContent=await sha(pw.value);}}), out);
+}
+
+if(location.hash==='#setup') setup(); else gate();
+</script>
+</body>
+</html>
