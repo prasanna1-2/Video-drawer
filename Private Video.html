@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Private Video</title>
+<style>
+:root{--bg:#f6f5f2;--card:#fff;--text:#1c1b19;--muted:#6b6962;--accent:#2f5bea;--border:#e2e0da;--err:#c0392b;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141414;--card:#1f1f1f;--text:#f1efe9;--muted:#9a978f;--accent:#7b9bff;--border:#333;--err:#ff7b6b;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#141414;--card:#1f1f1f;--text:#f1efe9;--muted:#9a978f;--accent:#7b9bff;--border:#333;--err:#ff7b6b;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:640px}
+h1{font-size:1.3rem;margin:0 0 6px}
+p{color:var(--muted);margin:0 0 16px;line-height:1.45;font-size:.95rem}
+input[type=password],input[type=text]{width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:1rem;margin-bottom:12px}
+input[type=file]{width:100%;margin-bottom:12px;color:var(--text)}
+button{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:12px 18px;font-size:1rem;cursor:pointer;width:100%}
+button.ghost{background:transparent;color:var(--muted);border:1px solid var(--border);margin-top:14px;width:auto;padding:8px 14px;font-size:.85rem}
+button:disabled{opacity:.6}
+video{width:100%;max-height:70vh;border-radius:12px;background:#000;display:block}
+.msg{font-size:.9rem;margin-top:10px;min-height:1.2em;color:var(--muted)}
+.err{color:var(--err)}
+</style>
+</head>
+<body>
+<div class="card" id="app"></div>
+<script id="state" type="application/json">{"videoId":"b816705f9ba3c58d7c226e40c3e77707","hash":"72c7339010816a8b0a0fd4916b571c1ac4eb784ce1b73bb359715de2b1af06a8","title":"Proof of Rs 1000"}</script>
+<script>
+(function(){
+  var S = JSON.parse(document.getElementById('state').textContent);
+  var app = document.getElementById('app');
+  var owner = false, forceSetup = false, assets = null, artifact = null;
+
+  function el(tag, props, kids){
+    var e = document.createElement(tag);
+    Object.keys(props||{}).forEach(function(k){
+      if(k==='text') e.textContent = props[k]; else e[k] = props[k];
+    });
+    (kids||[]).forEach(function(c){ e.appendChild(c); });
+    return e;
+  }
+  async function sha(str){
+    var buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('pv-salt:' + str));
+    return Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,'0')}).join('');
+  }
+
+  function renderGate(){
+    app.innerHTML = '';
+    var pw = el('input',{type:'password',placeholder:'Password',autocomplete:'current-password'});
+    var msg = el('div',{className:'msg'});
+    var btn = el('button',{text:'Unlock'});
+    async function go(){
+      msg.className='msg'; msg.textContent='';
+      var h = await sha(pw.value);
+      if(h === S.hash){ renderPlayer(); }
+      else { msg.className='msg err'; msg.textContent='Wrong password.'; }
+    }
+    btn.onclick = go;
+    pw.onkeydown = function(e){ if(e.key==='Enter') go(); };
+    app.append(el('h1',{text: S.title || 'Private video'}), el('p',{text:'Enter the password to watch.'}), pw, btn, msg);
+    if(owner) app.append(manageBtn());
+  }
+
+  function renderPlayer(){
+    app.innerHTML = '';
+    var v = el('video',{controls:true,playsInline:true,preload:'metadata',src:'/_blob/' + S.videoId});
+    app.append(el('h1',{text: S.title || 'Video'}), v);
+    if(owner) app.append(manageBtn());
+  }
+
+  function manageBtn(){
+    return el('button',{className:'ghost',text:'Replace video / change password',onclick:function(){forceSetup=true;render();}});
+  }
+
+  function renderSetup(){
+    app.innerHTML = '';
+    var title = el('input',{type:'text',placeholder:'Title (optional)',value:S.title||''});
+    var pw = el('input',{type:'password',placeholder:'Choose a password',autocomplete:'new-password'});
+    var file = el('input',{type:'file',accept:'video/*'});
+    var msg = el('div',{className:'msg'});
+    var btn = el('button',{text:'Upload and publish'});
+    btn.onclick = async function(){
+      msg.className='msg';
+      var f = file.files[0];
+      if(!pw.value){ msg.className='msg err'; msg.textContent='Please choose a password.'; return; }
+      if(!f && !S.videoId){ msg.className='msg err'; msg.textContent='Please choose a video.'; return; }
+      if(f && f.size > 20*1024*1024){ msg.className='msg err'; msg.textContent='That file is over the 20 MB limit. Compress or trim it first.'; return; }
+      btn.disabled = true; msg.textContent = f ? 'Uploading… this can take a minute.' : 'Saving…';
+      try{
+        if(f){ var r = await assets.upload(f); S.videoId = r.id; }
+        S.hash = await sha(pw.value);
+        S.title = title.value;
+        var clone = document.documentElement.cloneNode(true);
+        clone.querySelector('#state').textContent = JSON.stringify(S);
+        clone.querySelector('#app').innerHTML = '';
+        await artifact.publish('<!DOCTYPE html>\n' + clone.outerHTML);
+      }catch(e){
+        btn.disabled = false; msg.className='msg err';
+        msg.textContent = 'Failed: ' + (e && e.message ? e.message : 'unknown error');
+      }
+    };
+    app.append(el('h1',{text:'Set up your private video'}),
+      el('p',{text:'Upload one video (up to 20 MB) and pick a password. Viewers will need it to watch.'}),
+      title, pw, file, btn, msg);
+    if(S.videoId) app.append(el('button',{className:'ghost',text:'Cancel',onclick:function(){forceSetup=false;render();}}));
+  }
+
+  function render(){
+    if(owner && (forceSetup || !S.videoId)) return renderSetup();
+    if(!S.videoId){
+      app.innerHTML = '';
+      app.append(el('h1',{text:'Nothing here yet'}), el('p',{text:'The owner hasn’t uploaded a video.'}));
+      return;
+    }
+    if(S.hash) renderGate(); else renderPlayer();
+  }
+
+  render();
+  Promise.all([claude.use('user'), claude.use('assets'), claude.use('artifact')]).then(function(r){
+    owner = !!(r[0] && r[0].isOwner()); assets = r[1]; artifact = r[2];
+    if(!assets || !artifact) owner = false;
+    render();
+  }).catch(function(){});
+})();
+</script>
+
+
+</body></html>
